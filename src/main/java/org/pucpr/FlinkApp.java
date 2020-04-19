@@ -16,7 +16,7 @@ import java.io.Serializable;
 public class FlinkApp {
     public static void main(String[] args) throws Exception {
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        DataStream<String> file = see.readTextFile("src\\main\\resources\\ocorrencias_criminais_sample.csv");
+        DataStream<String> file = see.readTextFile("src\\main\\resources\\ocorrencias_criminais.csv");
 
         SingleOutputStreamOperator<Crime> crimeMap = file.map((String t) -> {
             String[] columns = t.split(";");
@@ -29,7 +29,7 @@ public class FlinkApp {
 
         AllWindowedStream<Crime, GlobalWindow> crimeMapTousand = crimeMap.countWindowAll(10000);
 
-        System.out.println("A cada 10 mil crimes:");
+
         //1. A cada 10 mil crimes a quantidade de crimes do tipo NARCOTICS;
         crimeMapTousand.aggregate(new AggregateFunction<Crime, Integer, Integer>() {
             public Integer createAccumulator() {
@@ -60,7 +60,7 @@ public class FlinkApp {
             }
 
             public Integer add(Crime crime, Integer acc) {
-                if (crime.tipo.contains("NARCOTICS") && crime.ano == 2010) {
+                if (crime.tipo.contains("NARCOTICS") && crime.ano.equals(2010)) {
                     return acc + 1;
                 }
                 return acc;
@@ -83,7 +83,7 @@ public class FlinkApp {
             }
 
             public Integer add(Crime crime, Integer acc) {
-                if (crime.dia == 1) {
+                if (crime.dia.equals(1)) {
                     return acc + 1;
                 }
                 return acc;
@@ -100,13 +100,13 @@ public class FlinkApp {
                 .print("Crimes no dia 01");
 
         //4.A cada 10 mil crimes, a quantidade de crimes que ocorreram no dia 1 e que sejam do tipo NARCOTICS;
-        SingleOutputStreamOperator<Integer> narcotics01 = crimeMapTousand.aggregate(new AggregateFunction<Crime, Integer, Integer>() {
+        crimeMapTousand.aggregate(new AggregateFunction<Crime, Integer, Integer>() {
             public Integer createAccumulator() {
                 return 0;
             }
 
             public Integer add(Crime crime, Integer acc) {
-                if (crime.tipo.contains("NARCOTICS") && crime.dia == 1) {
+                if (crime.tipo.contains("NARCOTICS") && crime.dia.equals(1)) {
                     return acc + 1;
                 }
                 return acc;
@@ -119,8 +119,8 @@ public class FlinkApp {
             public Integer merge(Integer acc, Integer acc1) {
                 return acc + acc1;
             }
-        });
-        narcotics01.print("NARCOTICS no 01");
+        })
+                .print("NARCOTICS no 01");
 
         //5.A cada 10 mil crimes, a quantidade de crimes que ocorreram no dia 1, que sejam do tipo NARCOTICS.
         // Do resultado gerado obter uma média;
@@ -147,28 +147,69 @@ public class FlinkApp {
                 .keyBy(0)
                 .reduce(new ReduceFunction<Tuple3<String, Integer, Integer>>() {
                     @Override
-                    public Tuple3<String, Integer, Integer> reduce(Tuple3<String, Integer, Integer> t2, Tuple3<String, Integer, Integer> t1) throws Exception {
+                    public Tuple3<String, Integer, Integer> reduce(Tuple3<String, Integer, Integer> t2, Tuple3<String, Integer, Integer> t1) {
                         return new Tuple3<>(t1.f0, t1.f1 + t2.f1, t1.f2 + t2.f2);
                     }
                 })
-                .map(new MapFunction<Tuple3<String, Integer, Integer>, Object>() {
+                .map(new MapFunction<Tuple3<String, Integer, Integer>, Integer>() {
                     @Override
-                    public Object map(Tuple3<String, Integer, Integer> t) throws Exception {
-                        return new Tuple2<String, Double>(t.f0, t.f1 / (double) t.f2);
+                    public Integer map(Tuple3<String, Integer, Integer> t) {
+                        return t.f1 / t.f2;
                     }
                 })
                 .print("Média de NARCOTICS no 01");
 
         //6.A cada 10 mil crimes, a quantidade de crimes que ocorreram no dia 1, que sejam do tipo NARCOTICS.
         // Do resultado gerado obter o valor máximo;
-        narcotics01.keyBy(0)
+        crimeMapTousand.aggregate(new AggregateFunction<Crime, Integer, Tuple2<String, Integer>>() {
+            public Integer createAccumulator() {
+                return 0;
+            }
+
+            public Integer add(Crime crime, Integer acc) {
+                if (crime.tipo.contains("NARCOTICS") && crime.dia.equals(1)) {
+                    return acc + 1;
+                }
+                return acc;
+            }
+
+            public Tuple2<String, Integer> getResult(Integer acc) {
+                return new Tuple2<>("Narcotics", acc);
+            }
+
+            public Integer merge(Integer acc, Integer acc1) {
+                return acc + acc1;
+            }
+        })
+                .keyBy(0)
                 .max(1)
-                .print("Maior ocorrencia de NARCOTICS no 01");
+                .print("Maior ocorrência de NARCOTICS no 01");
 
-        //7.Para crimes do tipo NARCOTICS. A cada 10 mil crimes ocorridos no dia 1.
+       //7.Para crimes do tipo NARCOTICS. A cada 10 mil crimes ocorridos no dia 1.
         // Agrupar os crimes de acordo com o mês. Gerar uma soma com os resultados obtidos.
+        crimeMapTousand.aggregate(new AggregateFunction<Crime, Integer, Tuple2<String, Integer>>() {
+            public Integer createAccumulator() {
+                return 0;
+            }
 
+            public Integer add(Crime crime, Integer acc) {
+                if (crime.tipo.contains("NARCOTICS") && crime.dia.equals(1)) {
+                    return acc + 1;
+                }
+                return acc;
+            }
 
+            public Tuple2<String, Integer> getResult(Integer acc) {
+                return new Tuple2<>("Narcotics", acc);
+            }
+
+            public Integer merge(Integer acc, Integer acc1) {
+                return acc + acc1;
+            }
+        })
+                .keyBy(0)
+                .sum(1)
+                .print("Soma Narcotics dia 01 por mês");
         see.execute();
     }
 
