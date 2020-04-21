@@ -1,6 +1,7 @@
 package org.pucpr;
 
 import org.apache.flink.api.common.functions.AggregateFunction;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -9,7 +10,9 @@ import org.apache.flink.streaming.api.datastream.AllWindowedStream;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.windowing.AllWindowFunction;
 import org.apache.flink.streaming.api.windowing.windows.GlobalWindow;
+import org.apache.flink.util.Collector;
 
 import java.io.Serializable;
 
@@ -187,26 +190,27 @@ public class FlinkApp {
 
        //7.Para crimes do tipo NARCOTICS. A cada 10 mil crimes ocorridos no dia 1.
         // Agrupar os crimes de acordo com o mês. Gerar uma soma com os resultados obtidos.
-        crimeMapTousand.aggregate(new AggregateFunction<Crime, Integer, Tuple2<String, Integer>>() {
-            public Integer createAccumulator() {
-                return 0;
+        crimeMap.filter(new FilterFunction<Crime>() {
+            @Override
+            public boolean filter(Crime crime) throws Exception {
+                return crime.tipo.contains("NARCOTICS");
             }
-
-            public Integer add(Crime crime, Integer acc) {
-                if (crime.tipo.contains("NARCOTICS") && crime.dia.equals(1)) {
-                    return acc + 1;
-                }
-                return acc;
-            }
-
-            public Tuple2<String, Integer> getResult(Integer acc) {
-                return new Tuple2<>("Narcotics", acc);
-            }
-
-            public Integer merge(Integer acc, Integer acc1) {
-                return acc + acc1;
-            }
-        })
+        }).keyBy("mes")
+                .countWindowAll(10000)
+                .apply(new AllWindowFunction<Crime, Tuple2<Integer, Integer>, GlobalWindow>() {
+                    @Override
+                    public void apply(GlobalWindow window, Iterable<Crime> values, Collector<Tuple2<Integer, Integer>> out) throws Exception {
+                        int key = 0;
+                        int count = 0;
+                        for (Crime c : values) {
+                            if (c.dia == 1) {
+                                key = c.mes;
+                                count++;
+                            }
+                        }
+                        out.collect(new Tuple2<>(key, count));
+                    }
+                })
                 .keyBy(0)
                 .sum(1)
                 .print("Soma Narcotics dia 01 por mês");
@@ -218,9 +222,6 @@ public class FlinkApp {
         public Integer mes;
         public Integer ano;
         public String tipo;
-
-        public Crime() {
-        }
 
         public Crime(Integer dia, Integer mes, Integer ano, String tipo) {
             this.dia = dia;
